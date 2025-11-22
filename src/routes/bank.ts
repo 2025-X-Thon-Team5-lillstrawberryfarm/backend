@@ -176,6 +176,16 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
   try {
     const tokenResponse = await exchangeAuthCode(kftcAuthCode, requestedScope);
 
+    const accessToken = tokenResponse.access_token ?? null;
+    const refreshToken = tokenResponse.refresh_token ?? null;
+    const userSeqNo = tokenResponse.user_seq_no ?? null;
+    const expiresInRaw = tokenResponse.expires_in;
+    const expiresIn = typeof expiresInRaw === 'number' ? expiresInRaw : expiresInRaw ? Number(expiresInRaw) : null;
+
+    if (!accessToken) {
+      return res.status(502).json({ error: 'invalid_kftc_response' });
+    }
+
     // 사용자 토큰 저장
     await pool.execute(
       `UPDATE users 
@@ -185,10 +195,10 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
            kftc_token_expires_at = IFNULL(DATE_ADD(NOW(), INTERVAL ? SECOND), NULL)
        WHERE id = ?`,
       [
-        tokenResponse.access_token,
-        tokenResponse.refresh_token ?? null,
-        tokenResponse.user_seq_no ?? null,
-        tokenResponse.expires_in ?? 0,
+        accessToken,
+        refreshToken,
+        userSeqNo,
+        expiresIn ?? 0,
         userId,
       ]
     );
