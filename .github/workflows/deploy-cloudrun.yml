@@ -37,7 +37,7 @@ jobs:
           source: .                # 현재 레포 소스를 Cloud Build가 Dockerfile로 빌드
           flags: --allow-unauthenticated
           env_vars: |
-            NODE_ENV=production
+            NODE_ENV=development
             KFTC_BASE_URL=${{ secrets.KFTC_BASE_URL }}
             KFTC_CLIENT_ID=${{ secrets.KFTC_CLIENT_ID }}
             KFTC_CLIENT_SECRET=${{ secrets.KFTC_CLIENT_SECRET }}

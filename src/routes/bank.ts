@@ -562,6 +562,9 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
 
         const rawList = await fetchKftcTransactions(accessToken, fintechUseNum, fromDate, toDate);
         debugInfo.rawCount += rawList.length;
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`[KFTC][transactions] fintech_use_num=${fintechUseNum}, fetched=${rawList.length}`);
+        }
         const mapped = rawList.map((t) => {
           const hh = t.tran_time?.substring(0, 2) || '00';
           const mm = t.tran_time?.substring(2, 4) || '00';
@@ -616,7 +619,7 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
       status: 'SYNC_COMPLETED',
       bankName: responseBankName,
       transactions: responseTransactions,
-      ...(process.env.NODE_ENV !== 'production' ? { debug: debugInfo } : {}),
+      debug: debugInfo,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected error';
