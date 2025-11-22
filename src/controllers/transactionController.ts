@@ -91,6 +91,12 @@ export async function listTransactions(req: Request, res: Response): Promise<Res
     });
   } catch (err) {
     console.error('[transactions][list] DB error:', err);
-    return res.status(500).json({ error: 'transactions_fetch_failed' });
+    const detail =
+      process.env.NODE_ENV === 'production'
+        ? undefined
+        : err instanceof Error
+          ? err.message
+          : String(err);
+    return res.status(500).json({ error: 'transactions_fetch_failed', detail });
   }
 }
