@@ -38,3 +38,8 @@ jobs:
           flags: --allow-unauthenticated
           env_vars: |
             NODE_ENV=production
+            NODE_ENV=production
+            KFTC_BASE_URL=${{ secrets.KFTC_BASE_URL }}
+            KFTC_CLIENT_ID=${{ secrets.KFTC_CLIENT_ID }}
+            KFTC_CLIENT_SECRET=${{ secrets.KFTC_CLIENT_SECRET }}
+            KFTC_REDIRECT_URI=${{ secrets.KFTC_REDIRECT_URI }}
