@@ -1,0 +1,45 @@
+name: Deploy Backend to Cloud Run
+
+on:
+  push:
+    branches: ["main"]   # main에 push될 때마다 배포
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      SERVICE_NAME: backend-service       # Cloud Run 서비스 이름
+      REGION: asia-northeast3            # 서울 리전 (원하면 다른 리전)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 1) GCP 인증 (서비스 계정 JSON 사용)
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      # 2) gcloud SDK 세팅
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      # 3) Cloud Run 배포 (Dockerfile 빌드 → backend-service로)
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          source: .                # 현재 레포 소스를 Cloud Build가 Dockerfile로 빌드
+          allow_unauthenticated: true
+          env_vars: |
+            NODE_ENV=production
+            PORT=8080
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASS=${{ secrets.DB_PASS }}
+            ANALYSIS_BASE_URL=${{ secrets.ANALYSIS_BASE_URL }}
