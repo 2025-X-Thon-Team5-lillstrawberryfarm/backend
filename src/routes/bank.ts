@@ -509,6 +509,11 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
       category: string | null;
       amount: number;
     }> = [];
+    const debugInfo = {
+      accountsProcessed: 0,
+      rawCount: 0,
+      insertedCount: 0,
+    };
 
     if (transactions && Array.isArray(transactions) && transactions.length > 0) {
       // 클라이언트가 거래를 직접 보낸 경우 그대로 저장
@@ -553,8 +558,10 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
         if (acc.bank_name) responseBankName = acc.bank_name;
         const fintechUseNum = acc.fintech_use_num;
         if (!fintechUseNum) continue;
+        debugInfo.accountsProcessed += 1;
 
         const rawList = await fetchKftcTransactions(accessToken, fintechUseNum, fromDate, toDate);
+        debugInfo.rawCount += rawList.length;
         const mapped = rawList.map((t) => {
           const hh = t.tran_time?.substring(0, 2) || '00';
           const mm = t.tran_time?.substring(2, 4) || '00';
@@ -592,7 +599,8 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
           (user_id, account_id, kftc_tran_id, transacted_at, original_content, amount, balance_after, type, method, store_name, category, is_excluded, memo)
           VALUES ?
         `;
-        await pool.query<ResultSetHeader>(insertSql, [allValues]);
+        const [result] = await pool.query<ResultSetHeader>(insertSql, [allValues]);
+        debugInfo.insertedCount = result.affectedRows;
 
         responseTransactions = allValues.map((v) => ({
           kftc_tran_id: v[2] as string,
@@ -608,6 +616,7 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
       status: 'SYNC_COMPLETED',
       bankName: responseBankName,
       transactions: responseTransactions,
+      ...(process.env.NODE_ENV !== 'production' ? { debug: debugInfo } : {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected error';
