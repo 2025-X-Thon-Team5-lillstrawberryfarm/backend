@@ -324,6 +324,9 @@ async function fetchKftcAccounts(accessToken: string, userSeqNo: string): Promis
   }
 
   try {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[KFTC][accounts]', { status: resp.status, body: raw });
+    }
     const parsed = JSON.parse(raw) as { res_list?: KftcAccount[]; [key: string]: unknown };
     return parsed.res_list ?? [];
   } catch (err) {
@@ -370,6 +373,15 @@ async function fetchKftcTransactions(
   }
 
   try {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[KFTC][transactions]', {
+        fintechUseNum,
+        status: resp.status,
+        from,
+        to,
+        body: raw,
+      });
+    }
     const parsed = JSON.parse(raw) as { res_list?: KftcTransactionRaw[]; [key: string]: unknown };
     return parsed.res_list ?? [];
   } catch (err) {
