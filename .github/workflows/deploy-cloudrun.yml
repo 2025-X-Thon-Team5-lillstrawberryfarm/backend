@@ -35,7 +35,7 @@ jobs:
           service: ${{ env.SERVICE_NAME }}
           region: ${{ env.REGION }}
           source: .                # 현재 레포 소스를 Cloud Build가 Dockerfile로 빌드
-          allow_unauthenticated: true
+          flags: --allow-unauthenticated
           env_vars: |
             NODE_ENV=production
             PORT=8080
