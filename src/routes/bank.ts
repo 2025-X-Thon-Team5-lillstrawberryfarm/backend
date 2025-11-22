@@ -502,6 +502,8 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
     );
 
     let responseBankName = bankName || 'unknown';
+    const bankNames: string[] = [];
+    const accountsInfo: Array<{ fintech_use_num?: string; bank_name?: string; account_num?: string | null }> = [];
     let responseTransactions: Array<{
       kftc_tran_id: string;
       transacted_at: string;
@@ -555,7 +557,15 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
 
       for (const acc of accounts) {
         const accountId = await upsertBankAccount(userId, acc);
-        if (acc.bank_name) responseBankName = acc.bank_name;
+        if (acc.bank_name) {
+          responseBankName = acc.bank_name;
+          bankNames.push(acc.bank_name);
+        }
+        accountsInfo.push({
+          fintech_use_num: acc.fintech_use_num,
+          bank_name: acc.bank_name,
+          account_num: acc.account_num ?? null,
+        });
         const fintechUseNum = acc.fintech_use_num;
         if (!fintechUseNum) continue;
         debugInfo.accountsProcessed += 1;
@@ -618,6 +628,8 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
     return res.status(200).json({
       status: 'SYNC_COMPLETED',
       bankName: responseBankName,
+      bankNames,
+      accounts: accountsInfo,
       transactions: responseTransactions,
       debug: debugInfo,
     });
