@@ -38,4 +38,3 @@ jobs:
           flags: --allow-unauthenticated
           env_vars: |
             NODE_ENV=production
-            PORT=8080
