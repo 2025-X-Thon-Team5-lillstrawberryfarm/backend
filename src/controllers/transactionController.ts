@@ -60,18 +60,19 @@ export async function listTransactions(req: Request, res: Response): Promise<Res
   const offset = pageNumberRaw * PAGE_SIZE;
 
   try {
-    const [rows] = await pool.execute<TransactionRow[]>(
-      `
+    // LIMIT/OFFSET에 placeholder 사용 시 MySQL 버전에 따라 오류가 날 수 있어 inline 숫자로 처리
+    const limit = PAGE_SIZE + 1;
+    const sql = `
       SELECT id, transacted_at, store_name, original_content, type, amount, category
       FROM transactions
       WHERE user_id = ?
         AND transacted_at >= ?
         AND transacted_at < ?
       ORDER BY transacted_at DESC
-      LIMIT ? OFFSET ?
-      `,
-      [userId, range.start, range.end, PAGE_SIZE + 1, offset]
-    );
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const [rows] = await pool.query<TransactionRow[]>(sql, [userId, range.start, range.end]);
 
     const items = rows.slice(0, PAGE_SIZE).map((row) => {
       const dt = new Date(row.transacted_at);
