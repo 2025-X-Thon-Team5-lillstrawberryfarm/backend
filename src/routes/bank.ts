@@ -39,6 +39,7 @@ type KftcTransactionRaw = {
   after_balance_amt?: number;
   inout_type: '입금' | '출금' | string;
   tran_id?: string;
+  bank_tran_id?: string;
 };
 
 type KftcAccount = {
@@ -78,12 +79,34 @@ type FetchAccountRequest = {
 };
 
 const KFTC_BASE_URL = (process.env.KFTC_BASE_URL || 'https://testapi.openbanking.or.kr').replace(/\/+$/, '');
+const KFTC_BANK_TRAN_ID_PREFIX = process.env.KFTC_BANK_TRAN_ID_PREFIX || 'M202200001';
 const KFTC_CLIENT_ID = process.env.KFTC_CLIENT_ID;
 const KFTC_CLIENT_SECRET = process.env.KFTC_CLIENT_SECRET;
 const KFTC_REDIRECT_URI = process.env.KFTC_REDIRECT_URI;
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const stateStore = new Map<string, number>(); // state -> expiresAt
+
+function addDays(date: Date, days: number): Date {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function formatYmd(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}${m}${d}`;
+}
+
+function formatYmdHms(date: Date): string {
+  const ymd = formatYmd(date);
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${ymd}${hh}${mm}${ss}`;
+}
 
 function generateState(): string {
   return crypto.randomBytes(16).toString('hex'); // 32 chars
@@ -109,6 +132,7 @@ function assertEnv(): void {
   if (!KFTC_CLIENT_ID) missing.push('KFTC_CLIENT_ID');
   if (!KFTC_CLIENT_SECRET) missing.push('KFTC_CLIENT_SECRET');
   if (!KFTC_REDIRECT_URI) missing.push('KFTC_REDIRECT_URI');
+  if (!KFTC_BANK_TRAN_ID_PREFIX) missing.push('KFTC_BANK_TRAN_ID_PREFIX');
 
   if (missing.length > 0) {
     throw new Error(`Missing required env vars: ${missing.join(', ')}`);
@@ -242,6 +266,19 @@ export async function ensureKftcAccessToken(userId: number, requestedScope = 'lo
   return accessToken;
 }
 
+async function getUserSeqNo(userId: number): Promise<string> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT kftc_user_seq_no FROM users WHERE id = ? LIMIT 1`,
+    [userId]
+  );
+  const row = rows[0];
+  const userSeq = row?.kftc_user_seq_no;
+  if (!userSeq) {
+    throw new Error('user_seq_no_not_found');
+  }
+  return userSeq;
+}
+
 async function fetchKftcUserInfo(accessToken: string): Promise<KftcUserInfo | null> {
   assertEnv();
   const url = `${KFTC_BASE_URL}/v2.0/user/me`;
@@ -266,12 +303,14 @@ async function fetchKftcUserInfo(accessToken: string): Promise<KftcUserInfo | nu
   }
 }
 
-async function fetchKftcAccounts(accessToken: string): Promise<KftcAccount[]> {
+async function fetchKftcAccounts(accessToken: string, userSeqNo: string): Promise<KftcAccount[]> {
   assertEnv();
-  // 실제 KFTC 계좌 목록 API 엔드포인트는 환경에 맞게 수정 필요
-  const url = `${KFTC_BASE_URL}/v2.0/account/list`;
+  const url = new URL(`${KFTC_BASE_URL}/v2.0/account/list`);
+  url.searchParams.set('user_seq_no', userSeqNo);
+  url.searchParams.set('include_cancel_yn', 'N');
+  url.searchParams.set('sort_order', 'D');
 
-  const resp = await fetch(url, {
+  const resp = await fetch(url.toString(), {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -300,11 +339,22 @@ async function fetchKftcTransactions(
 ): Promise<KftcTransactionRaw[]> {
   assertEnv();
 
+  const now = new Date();
+  const to = toDate || formatYmd(now);
+  const from = fromDate || formatYmd(addDays(now, -30));
+
+  const bankTranId = `${KFTC_BANK_TRAN_ID_PREFIX}U${Math.random().toString(36).substring(2, 11).toUpperCase()}`;
+  const tranDtime = formatYmdHms(now);
+
   const url = new URL(`${KFTC_BASE_URL}/v2.0/account/transaction_list/fin_num`);
+  url.searchParams.set('bank_tran_id', bankTranId);
   url.searchParams.set('fintech_use_num', fintechUseNum);
+  url.searchParams.set('inquiry_type', 'A'); // 전체
+  url.searchParams.set('inquiry_base', 'D'); // 일자 기준
+  url.searchParams.set('from_date', from); // YYYYMMDD
+  url.searchParams.set('to_date', to); // YYYYMMDD
   url.searchParams.set('sort_order', 'D'); // Desc
-  if (fromDate) url.searchParams.set('from_date', fromDate); // YYYYMMDD
-  if (toDate) url.searchParams.set('to_date', toDate); // YYYYMMDD
+  url.searchParams.set('tran_dtime', tranDtime);
 
   const resp = await fetch(url.toString(), {
     method: 'GET',
@@ -328,27 +378,28 @@ async function fetchKftcTransactions(
 }
 
 async function upsertBankAccount(userId: number, acc: KftcAccount): Promise<number | null> {
-  const key = acc.account_num || acc.fintech_use_num;
-  if (!key) return null;
+  const fintechUseNum = acc.fintech_use_num;
+  if (!fintechUseNum) return null;
   const bankName = acc.bank_name ?? 'unknown';
+  const accountNum = acc.account_num ?? fintechUseNum;
   const balance = acc.balance_amt ?? null;
 
   const [found] = await pool.query<RowDataPacket[]>(
-    `SELECT id FROM bank_accounts WHERE user_id = ? AND account_num = ? LIMIT 1`,
-    [userId, key]
+    `SELECT id FROM bank_accounts WHERE user_id = ? AND fintech_use_num = ? LIMIT 1`,
+    [userId, fintechUseNum]
   );
   const existing = found[0];
   if (existing?.id) {
     await pool.execute(
-      `UPDATE bank_accounts SET bank_name = ?, balance = ? WHERE id = ?`,
-      [bankName, balance, existing.id]
+      `UPDATE bank_accounts SET bank_name = ?, account_num = ?, balance = ? WHERE id = ?`,
+      [bankName, accountNum, balance, existing.id]
     );
     return existing.id as number;
   }
 
   const [result] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO bank_accounts (user_id, bank_name, account_num, balance) VALUES (?, ?, ?, ?)`,
-    [userId, bankName, key, balance]
+    `INSERT INTO bank_accounts (user_id, bank_name, account_num, fintech_use_num, balance) VALUES (?, ?, ?, ?, ?)`,
+    [userId, bankName, accountNum, fintechUseNum, balance]
   );
   return result.insertId;
 }
@@ -492,15 +543,14 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
         amount: v[5] as number,
       }));
     } else {
-      // 서버가 금융결제원에서 모든 계좌/거래를 가져와 저장
-      const userInfo = await fetchKftcUserInfo(accessToken);
-      if (userInfo?.bank_name) responseBankName = userInfo.bank_name;
-
-      const accounts = await fetchKftcAccounts(accessToken);
+      // 서버가 금융결제원에서 모든 계좌/거래를 가져와 저장 (실제 KFTC 사양 적용)
+      const userSeq = userSeqNo || (await getUserSeqNo(userId));
+      const accounts = await fetchKftcAccounts(accessToken, userSeq);
       const allValues: any[] = [];
 
       for (const acc of accounts) {
         const accountId = await upsertBankAccount(userId, acc);
+        if (acc.bank_name) responseBankName = acc.bank_name;
         const fintechUseNum = acc.fintech_use_num;
         if (!fintechUseNum) continue;
 
@@ -510,7 +560,10 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
           const mm = t.tran_time?.substring(2, 4) || '00';
           const ss = t.tran_time?.substring(4, 6) || '00';
           const isoDate = `${t.tran_date}T${hh}:${mm}:${ss}`;
-          const kftcTranId = t.tran_id || `${t.tran_date}-${t.tran_time}-${t.printed_content ?? ''}-${t.tran_amt}`;
+          const kftcTranId =
+            t.tran_id ||
+            t.bank_tran_id ||
+            `${fintechUseNum}-${t.tran_date}-${t.tran_time}-${t.printed_content ?? ''}-${t.tran_amt}`;
           const type = t.inout_type === '입금' ? 'DEPOSIT' : 'WITHDRAW';
 
           return [

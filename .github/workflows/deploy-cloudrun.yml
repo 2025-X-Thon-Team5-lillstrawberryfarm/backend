@@ -38,7 +38,6 @@ jobs:
           flags: --allow-unauthenticated
           env_vars: |
             NODE_ENV=production
-            NODE_ENV=production
             KFTC_BASE_URL=${{ secrets.KFTC_BASE_URL }}
             KFTC_CLIENT_ID=${{ secrets.KFTC_CLIENT_ID }}
             KFTC_CLIENT_SECRET=${{ secrets.KFTC_CLIENT_SECRET }}
@@ -51,4 +50,4 @@ jobs:
             DB_CONNECTION_LIMIT=${{ secrets.DB_CONNECTION_LIMIT }}
             DB_CONNECT_TIMEOUT=${{ secrets.DB_CONNECT_TIMEOUT }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
-            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            KFTC_BANK_TRAN_ID_PREFIX=${{ secrets.KFTC_BANK_TRAN_ID_PREFIX }}
