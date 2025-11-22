@@ -66,13 +66,12 @@ export async function listTransactions(req: Request, res: Response): Promise<Res
       SELECT id, transacted_at, store_name, original_content, type, amount, category
       FROM transactions
       WHERE user_id = ?
-        AND transacted_at >= ?
-        AND transacted_at < ?
+        AND DATE_FORMAT(transacted_at, '%Y%m') = ?
       ORDER BY transacted_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    const [rows] = await pool.query<TransactionRow[]>(sql, [userId, range.start, range.end]);
+    const [rows] = await pool.query<TransactionRow[]>(sql, [userId, date]);
 
     const items = rows.slice(0, PAGE_SIZE).map((row) => {
       const dt = new Date(row.transacted_at);
