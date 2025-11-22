@@ -17,7 +17,7 @@ function getJwtSecret(): string {
 }
 
 export async function signup(req: Request, res: Response): Promise<Response> {
-  const { email, pw, nickname, agreed } = req.body || {};
+  const { email, pw, nickname } = req.body || {};
 
   if (!email || typeof email !== 'string') {
     return res.status(400).json({ error: 'email_required' });
@@ -27,9 +27,6 @@ export async function signup(req: Request, res: Response): Promise<Response> {
   }
   if (!nickname || typeof nickname !== 'string') {
     return res.status(400).json({ error: 'nickname_required' });
-  }
-  if (agreed !== true) {
-    return res.status(400).json({ error: 'terms_not_agreed' });
   }
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
