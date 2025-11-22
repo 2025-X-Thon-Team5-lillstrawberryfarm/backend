@@ -43,3 +43,12 @@ jobs:
             KFTC_CLIENT_ID=${{ secrets.KFTC_CLIENT_ID }}
             KFTC_CLIENT_SECRET=${{ secrets.KFTC_CLIENT_SECRET }}
             KFTC_REDIRECT_URI=${{ secrets.KFTC_REDIRECT_URI }}
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_PORT=${{ secrets.DB_PORT }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            DB_NAME=${{ secrets.DB_NAME }}
+            DB_CONNECTION_LIMIT=${{ secrets.DB_CONNECTION_LIMIT }}
+            DB_CONNECT_TIMEOUT=${{ secrets.DB_CONNECT_TIMEOUT }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
