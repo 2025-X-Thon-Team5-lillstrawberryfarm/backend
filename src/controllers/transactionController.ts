@@ -51,9 +51,13 @@ export async function listTransactions(req: Request, res: Response): Promise<Res
     return res.status(400).json({ error: 'invalid_date_format', detail: 'use YYYYMM' });
   }
 
-  const pageNumber = page ? Number(page) : 0;
+  const pageNumberRaw = page ? Number(page) : 0;
+  if (Number.isNaN(pageNumberRaw) || pageNumberRaw < 0) {
+    return res.status(400).json({ error: 'invalid_page' });
+  }
+
   const PAGE_SIZE = 20;
-  const offset = pageNumber >= 0 ? pageNumber * PAGE_SIZE : 0;
+  const offset = pageNumberRaw * PAGE_SIZE;
 
   try {
     const [rows] = await pool.execute<TransactionRow[]>(
