@@ -1,9 +1,14 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import { pool } from '../config/db';
+import { requireAuth } from '../middleware/auth';
+import { ResultSetHeader } from 'mysql2';
 
 type ConnectRequestBody = {
   kftcAuthCode?: string;
   scope?: string;
+  bankName?: string;
+  transactions?: IncomingTransaction[];
 };
 
 type KftcTokenResponse = {
@@ -17,6 +22,21 @@ type KftcTokenResponse = {
 };
 
 const bankRouter = Router();
+
+type IncomingTransaction = {
+  kftc_tran_id: string;
+  transacted_at: string; // ISO string
+  original_content?: string;
+  amount: number;
+  balance_after?: number;
+  type: 'DEPOSIT' | 'WITHDRAW';
+  method?: string;
+  store_name?: string;
+  category?: string;
+  is_excluded?: boolean;
+  memo?: string;
+  account_id?: number;
+};
 
 const KFTC_BASE_URL = (process.env.KFTC_BASE_URL || 'https://testapi.openbanking.or.kr').replace(/\/+$/, '');
 const KFTC_CLIENT_ID = process.env.KFTC_CLIENT_ID;
@@ -139,8 +159,8 @@ bankRouter.get('/auth/callback', (req: Request, res: Response) => {
   });
 });
 
-bankRouter.post('/connect', async (req: Request, res: Response) => {
-  const { kftcAuthCode, scope }: ConnectRequestBody = req.body || {};
+bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => {
+  const { kftcAuthCode, scope, bankName, transactions }: ConnectRequestBody = req.body || {};
 
   if (!kftcAuthCode) {
     return res.status(400).json({ error: 'kftcAuthCode is required' });
@@ -148,17 +168,64 @@ bankRouter.post('/connect', async (req: Request, res: Response) => {
 
   const requestedScope = scope || 'login transfer';
 
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
   try {
     const tokenResponse = await exchangeAuthCode(kftcAuthCode, requestedScope);
 
+    // 사용자 토큰 저장
+    await pool.execute(
+      `UPDATE users 
+       SET kftc_access_token = ?, 
+           kftc_refresh_token = ?, 
+           kftc_user_seq_no = ?, 
+           kftc_token_expires_at = IFNULL(DATE_ADD(NOW(), INTERVAL ? SECOND), NULL)
+       WHERE id = ?`,
+      [
+        tokenResponse.access_token,
+        tokenResponse.refresh_token ?? null,
+        tokenResponse.user_seq_no ?? null,
+        tokenResponse.expires_in ?? 0,
+        userId,
+      ]
+    );
+
+    let syncedCount = 0;
+
+    if (transactions && Array.isArray(transactions) && transactions.length > 0) {
+      const values = transactions.map((t) => [
+        userId,
+        t.account_id ?? null,
+        t.kftc_tran_id,
+        t.transacted_at,
+        t.original_content ?? null,
+        t.amount,
+        t.balance_after ?? null,
+        t.type,
+        t.method ?? null,
+        t.store_name ?? null,
+        t.category ?? null,
+        t.is_excluded ?? false,
+        t.memo ?? null,
+      ]);
+
+      const insertSql = `
+        INSERT IGNORE INTO transactions
+        (user_id, account_id, kftc_tran_id, transacted_at, original_content, amount, balance_after, type, method, store_name, category, is_excluded, memo)
+        VALUES ?
+      `;
+
+      const [result] = await pool.query<ResultSetHeader>(insertSql, [values]);
+      syncedCount = result.affectedRows;
+    }
+
     return res.status(200).json({
-      accessToken: tokenResponse.access_token,
-      refreshToken: tokenResponse.refresh_token,
-      tokenType: tokenResponse.token_type,
-      expiresIn: tokenResponse.expires_in,
-      scope: tokenResponse.scope,
-      userSeqNo: tokenResponse.user_seq_no,
-      raw: tokenResponse, // keep raw response for downstream needs
+      status: 'SYNC_COMPLETED',
+      syncedCount,
+      bankName: bankName || 'unknown',
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected error';
