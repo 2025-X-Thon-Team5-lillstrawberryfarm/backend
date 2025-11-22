@@ -1,18 +1,27 @@
 {
-  "devDependencies": {
-    "@types/node": "^24.10.1",
-    "typescript": "^5.9.3"
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "Finance backend server (Express + TypeScript)",
+  "main": "dist/app.js",
+  "license": "MIT",
+
+  "scripts": {
+    "dev": "ts-node src/app.ts",
+    "build": "tsc",
+    "start": "node dist/app.js"
   },
+
   "dependencies": {
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.5",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0"
   },
-  "scripts": {
-    "build": "tsc",
-    "start": "node dist/app.js",
-    "dev": "ts-node src/app.ts"
+
+  "devDependencies": {
+    "@types/node": "^20.11.19",
+    "@types/express": "^5.0.5",
+    "@types/cors": "^2.8.19",
+    "typescript": "^5.9.3",
+    "ts-node": "^10.9.2"
   }
 }
