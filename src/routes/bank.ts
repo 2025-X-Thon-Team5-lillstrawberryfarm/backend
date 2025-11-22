@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { pool } from '../config/db';
 import { requireAuth } from '../middleware/auth';
-import { ResultSetHeader } from 'mysql2';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 
 type ConnectRequestBody = {
   kftcAuthCode?: string;
@@ -22,6 +22,12 @@ type KftcTokenResponse = {
 };
 
 const bankRouter = Router();
+type UserTokenRow = RowDataPacket & {
+  kftc_access_token: string | null;
+  kftc_refresh_token: string | null;
+  kftc_user_seq_no: string | null;
+  kftc_token_expires_at: Date | null;
+};
 
 type IncomingTransaction = {
   kftc_tran_id: string;
@@ -110,6 +116,99 @@ async function exchangeAuthCode(authCode: string, scope: string): Promise<KftcTo
   }
 }
 
+async function refreshAccessToken(refreshToken: string, scope: string, userSeqNo?: string | null): Promise<KftcTokenResponse> {
+  assertEnv();
+
+  const tokenUrl = `${KFTC_BASE_URL}/oauth/2.0/token`;
+  const body = new URLSearchParams({
+    refresh_token: refreshToken,
+    client_id: KFTC_CLIENT_ID as string,
+    client_secret: KFTC_CLIENT_SECRET as string,
+    grant_type: 'refresh_token',
+    scope,
+  });
+
+  if (userSeqNo) {
+    body.set('user_seq_no', userSeqNo);
+  }
+
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    },
+    body,
+  });
+
+  const rawBody = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`KFTC token refresh failed (${response.status}): ${rawBody}`);
+  }
+
+  try {
+    return JSON.parse(rawBody) as KftcTokenResponse;
+  } catch (err) {
+    throw new Error(`Failed to parse KFTC refresh response: ${err instanceof Error ? err.message : 'unknown error'}`);
+  }
+}
+
+export async function ensureKftcAccessToken(userId: number, requestedScope = 'login transfer'): Promise<string> {
+  const [rows] = await pool.execute<UserTokenRow[]>(
+    `SELECT kftc_access_token, kftc_refresh_token, kftc_user_seq_no, kftc_token_expires_at
+     FROM users WHERE id = ? LIMIT 1`,
+    [userId]
+  );
+  const userToken = rows[0];
+
+  if (!userToken) {
+    throw new Error('user_not_found');
+  }
+
+  const { kftc_access_token, kftc_refresh_token, kftc_token_expires_at, kftc_user_seq_no } = userToken;
+
+  const now = Date.now();
+  const expiresAt = kftc_token_expires_at ? new Date(kftc_token_expires_at).getTime() : null;
+  const bufferMs = 2 * 60 * 1000; // 2 minutes buffer
+
+  const isValid = !!kftc_access_token && !!expiresAt && expiresAt - now > bufferMs;
+  if (isValid) return kftc_access_token as string;
+
+  if (!kftc_refresh_token) {
+    throw new Error('refresh_token_missing');
+  }
+
+  const refreshed = await refreshAccessToken(kftc_refresh_token, requestedScope, kftc_user_seq_no);
+
+  const accessToken = refreshed.access_token ?? null;
+  const refreshToken = refreshed.refresh_token ?? kftc_refresh_token ?? null;
+  const userSeqNo = refreshed.user_seq_no ?? kftc_user_seq_no ?? null;
+  const expiresInRaw = refreshed.expires_in;
+  const expiresIn = typeof expiresInRaw === 'number' ? expiresInRaw : expiresInRaw ? Number(expiresInRaw) : null;
+
+  if (!accessToken) {
+    throw new Error('refresh_response_missing_access_token');
+  }
+
+  await pool.execute(
+    `UPDATE users 
+     SET kftc_access_token = ?, 
+         kftc_refresh_token = ?, 
+         kftc_user_seq_no = ?, 
+         kftc_token_expires_at = IFNULL(DATE_ADD(NOW(), INTERVAL ? SECOND), NULL)
+     WHERE id = ?`,
+    [
+      accessToken,
+      refreshToken,
+      userSeqNo,
+      expiresIn ?? 0,
+      userId,
+    ]
+  );
+
+  return accessToken;
+}
+
 bankRouter.get('/auth-url', (_req: Request, res: Response) => {
   try {
     assertEnv();
@@ -183,7 +282,11 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
     const expiresIn = typeof expiresInRaw === 'number' ? expiresInRaw : expiresInRaw ? Number(expiresInRaw) : null;
 
     if (!accessToken) {
-      return res.status(502).json({ error: 'invalid_kftc_response' });
+      console.error('[KFTC][connect] missing access_token in response:', tokenResponse);
+      return res.status(502).json({
+        error: 'invalid_kftc_response',
+        detail: process.env.NODE_ENV === 'production' ? undefined : tokenResponse,
+      });
     }
 
     // 사용자 토큰 저장
@@ -241,6 +344,22 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
     const message = error instanceof Error ? error.message : 'Unexpected error';
     console.error('[KFTC][connect] token exchange failed:', message);
     return res.status(502).json({ error: 'Failed to exchange kftcAuthCode', detail: message });
+  }
+});
+
+// 유효한 access_token을 반환하는 헬퍼 엔드포인트 (테스트/디버깅용)
+bankRouter.get('/access-token', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  try {
+    const token = await ensureKftcAccessToken(userId);
+    return res.status(200).json({ accessToken: token });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unexpected error';
+    return res.status(400).json({ error: 'token_refresh_failed', detail: message });
   }
 });
 
