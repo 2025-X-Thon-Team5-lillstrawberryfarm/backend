@@ -125,6 +125,29 @@ export async function listClusterMembers(req: Request, res: Response): Promise<R
   }
 }
 
+export async function listFollowers(req: Request, res: Response): Promise<Response> {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'unauthorized' });
+
+  try {
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `
+      SELECT u.id AS userId, u.nickname AS nick, u.profile_image AS img
+      FROM follows f
+      JOIN users u ON u.id = f.follower_id
+      WHERE f.following_id = ?
+      ORDER BY f.id DESC
+      `,
+      [userId]
+    );
+
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error('[social][followers] error:', err);
+    return res.status(500).json({ error: 'followers_fetch_failed' });
+  }
+}
+
 export async function getSocialReport(req: Request, res: Response): Promise<Response> {
   const targetId = Number(req.params.userId);
   if (Number.isNaN(targetId)) {

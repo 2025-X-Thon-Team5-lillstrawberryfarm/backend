@@ -165,3 +165,144 @@ export async function createPost(req: Request, res: Response): Promise<Response>
     conn.release();
   }
 }
+
+export async function createComment(req: Request, res: Response): Promise<Response> {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'unauthorized' });
+
+  const postId = Number(req.params.id);
+  if (Number.isNaN(postId)) return res.status(400).json({ error: 'invalid_post_id' });
+
+  const { content } = req.body || {};
+  if (!content || typeof content !== 'string') {
+    return res.status(400).json({ error: 'content_required' });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [postCheck] = await conn.query<RowDataPacket[]>(
+      `SELECT id FROM posts WHERE id = ? LIMIT 1`,
+      [postId]
+    );
+    if (!postCheck[0]) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'post_not_found' });
+    }
+
+    const [result] = await conn.query<ResultSetHeader>(
+      `INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)`,
+      [postId, userId, content]
+    );
+
+    await conn.execute(
+      `UPDATE posts SET comment_count = comment_count + 1 WHERE id = ?`,
+      [postId]
+    );
+
+    await conn.commit();
+
+    return res.status(200).json({ commentId: result.insertId });
+  } catch (err) {
+    await conn.rollback();
+    console.error('[community][comment] DB error:', err);
+    return res.status(500).json({ error: 'comment_create_failed' });
+  } finally {
+    conn.release();
+  }
+}
+
+export async function likePost(req: Request, res: Response): Promise<Response> {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'unauthorized' });
+
+  const postId = Number(req.params.id);
+  if (Number.isNaN(postId)) return res.status(400).json({ error: 'invalid_post_id' });
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [postCheck] = await conn.query<RowDataPacket[]>(
+      `SELECT id FROM posts WHERE id = ? LIMIT 1`,
+      [postId]
+    );
+    if (!postCheck[0]) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'post_not_found' });
+    }
+
+    try {
+      await conn.execute(
+        `INSERT INTO post_likes (post_id, user_id) VALUES (?, ?)`,
+        [postId, userId]
+      );
+    } catch (err: any) {
+      if (err?.code === 'ER_DUP_ENTRY') {
+        await conn.rollback();
+        return res.status(200).json({ status: 'ALREADY_LIKED' });
+      }
+      throw err;
+    }
+
+    await conn.execute(
+      `UPDATE posts SET like_count = like_count + 1 WHERE id = ?`,
+      [postId]
+    );
+
+    await conn.commit();
+
+    return res.status(200).json({ status: 'LIKED' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('[community][like] DB error:', err);
+    return res.status(500).json({ error: 'like_failed' });
+  } finally {
+    conn.release();
+  }
+}
+
+export async function deletePost(req: Request, res: Response): Promise<Response> {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'unauthorized' });
+
+  const postId = Number(req.params.id);
+  if (Number.isNaN(postId)) return res.status(400).json({ error: 'invalid_post_id' });
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [postRows] = await conn.query<RowDataPacket[]>(
+      `SELECT user_id FROM posts WHERE id = ? LIMIT 1`,
+      [postId]
+    );
+    const post = postRows[0];
+    if (!post) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'post_not_found' });
+    }
+    if (post.user_id !== userId) {
+      await conn.rollback();
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    await conn.execute(`DELETE FROM posts WHERE id = ?`, [postId]);
+
+    await conn.execute(
+      `UPDATE users SET post_count = GREATEST(post_count - 1, 0) WHERE id = ?`,
+      [userId]
+    );
+
+    await conn.commit();
+
+    return res.status(200).json({ status: 'DELETED' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('[community][delete] DB error:', err);
+    return res.status(500).json({ error: 'delete_failed' });
+  } finally {
+    conn.release();
+  }
+}
