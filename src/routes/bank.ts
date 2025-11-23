@@ -560,6 +560,7 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
       accountsProcessed: 0,
       rawCount: 0,
       insertedCount: 0,
+      accountsSkippedNoFintech: 0,
     };
     const kftcLogs: KftcDebugLog[] = [];
 
@@ -613,7 +614,10 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
           account_num: acc.account_num ?? null,
         });
         const fintechUseNum = acc.fintech_use_num;
-        if (!fintechUseNum) continue;
+        if (!fintechUseNum) {
+          debugInfo.accountsSkippedNoFintech += 1;
+          continue;
+        }
         debugInfo.accountsProcessed += 1;
 
         const rawList = await fetchKftcTransactions(accessToken, fintechUseNum, fromDate, toDate, kftcLogs);
@@ -674,13 +678,7 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
     return res.status(200).json({
       status: 'SYNC_COMPLETED',
       bankName: responseBankName,
-      bankNames,
-      accounts: accountsInfo,
       transactions: responseTransactions,
-      debug: {
-        ...debugInfo,
-        kftcLogs,
-      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected error';

@@ -12,6 +12,18 @@ interface TransactionRow extends RowDataPacket {
   category: string | null;
 }
 
+interface TransactionDetailRow extends RowDataPacket {
+  id: number;
+  transacted_at: string | Date;
+  store_name: string | null;
+  original_content: string | null;
+  amount: number;
+  balance_after: number | null;
+  method: string | null;
+  memo: string | null;
+  is_excluded: number | boolean | null;
+}
+
 function parseYearMonth(yyyymm: string): { start: string; end: string } | null {
   if (!/^\d{6}$/.test(yyyymm)) return null;
   const year = Number(yyyymm.slice(0, 4));
@@ -33,6 +45,15 @@ function formatDateParts(date: Date) {
   const hh = String(date.getHours()).padStart(2, '0');
   const mi = String(date.getMinutes()).padStart(2, '0');
   return { date: `${mm}.${dd}`, time: `${hh}:${mi}` };
+}
+
+function formatFullDate(date: Date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mi = String(date.getMinutes()).padStart(2, '0');
+  return `${yyyy}.${mm}.${dd} ${hh}:${mi}`;
 }
 
 export async function listTransactions(req: Request, res: Response): Promise<Response> {
@@ -100,5 +121,49 @@ export async function listTransactions(req: Request, res: Response): Promise<Res
         ? { message: err.message, name: err.name }
         : { message: String(err) };
     return res.status(500).json({ error: 'transactions_fetch_failed', detail });
+  }
+}
+
+export async function getTransactionDetail(req: Request, res: Response): Promise<Response> {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ error: 'invalid_id' });
+  }
+
+  try {
+    const [rows] = await pool.execute<TransactionDetailRow[]>(
+      `
+      SELECT id, transacted_at, store_name, original_content, amount, balance_after, method, memo, is_excluded
+      FROM transactions
+      WHERE id = ? AND user_id = ?
+      LIMIT 1
+      `,
+      [id, userId]
+    );
+
+    const row = rows[0];
+    if (!row) {
+      return res.status(404).json({ error: 'transaction_not_found' });
+    }
+
+    const fullDate = formatFullDate(new Date(row.transacted_at));
+    return res.status(200).json({
+      id: row.id,
+      store: row.store_name || row.original_content || '',
+      fullDate,
+      amt: row.amount,
+      balance: row.balance_after,
+      method: row.method,
+      memo: row.memo ?? '',
+      isExcluded: Boolean(row.is_excluded),
+    });
+  } catch (err) {
+    console.error('[transactions][detail] DB error:', err);
+    return res.status(500).json({ error: 'transaction_fetch_failed' });
   }
 }
