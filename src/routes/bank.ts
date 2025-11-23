@@ -49,6 +49,15 @@ type KftcAccount = {
   balance_amt?: number;
 };
 
+type KftcDebugLog = {
+  kind: 'accounts' | 'transactions';
+  fintechUseNum?: string;
+  status: number;
+  body: string;
+  from?: string;
+  to?: string;
+};
+
 const bankRouter = Router();
 type UserTokenRow = RowDataPacket & {
   kftc_access_token: string | null;
@@ -305,7 +314,11 @@ async function fetchKftcUserInfo(accessToken: string): Promise<KftcUserInfo | nu
   }
 }
 
-async function fetchKftcAccounts(accessToken: string, userSeqNo: string): Promise<KftcAccount[]> {
+async function fetchKftcAccounts(
+  accessToken: string,
+  userSeqNo: string,
+  debugLogs?: KftcDebugLog[]
+): Promise<KftcAccount[]> {
   assertEnv();
   const url = new URL(`${KFTC_BASE_URL}/v2.0/account/list`);
   url.searchParams.set('user_seq_no', userSeqNo);
@@ -329,6 +342,13 @@ async function fetchKftcAccounts(accessToken: string, userSeqNo: string): Promis
     if (process.env.NODE_ENV !== 'production') {
       console.log('[KFTC][accounts]', { status: resp.status, body: raw });
     }
+    if (debugLogs) {
+      debugLogs.push({
+        kind: 'accounts',
+        status: resp.status,
+        body: raw,
+      });
+    }
     const parsed = JSON.parse(raw) as { res_list?: KftcAccount[]; [key: string]: unknown };
     return parsed.res_list ?? [];
   } catch (err) {
@@ -340,7 +360,8 @@ async function fetchKftcTransactions(
   accessToken: string,
   fintechUseNum: string,
   fromDate?: string,
-  toDate?: string
+  toDate?: string,
+  debugLogs?: KftcDebugLog[]
 ): Promise<KftcTransactionRaw[]> {
   assertEnv();
 
@@ -377,6 +398,16 @@ async function fetchKftcTransactions(
   try {
     if (process.env.NODE_ENV !== 'production') {
       console.log('[KFTC][transactions]', {
+        fintechUseNum,
+        status: resp.status,
+        from,
+        to,
+        body: raw,
+      });
+    }
+    if (debugLogs) {
+      debugLogs.push({
+        kind: 'transactions',
         fintechUseNum,
         status: resp.status,
         from,
@@ -530,6 +561,7 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
       rawCount: 0,
       insertedCount: 0,
     };
+    const kftcLogs: KftcDebugLog[] = [];
 
     if (transactions && Array.isArray(transactions) && transactions.length > 0) {
       // 클라이언트가 거래를 직접 보낸 경우 그대로 저장
@@ -566,7 +598,7 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
     } else {
       // 서버가 금융결제원에서 모든 계좌/거래를 가져와 저장 (실제 KFTC 사양 적용)
       const userSeq = userSeqNo || (await getUserSeqNo(userId));
-      const accounts = await fetchKftcAccounts(accessToken, userSeq);
+      const accounts = await fetchKftcAccounts(accessToken, userSeq, kftcLogs);
       const allValues: any[] = [];
 
       for (const acc of accounts) {
@@ -584,7 +616,7 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
         if (!fintechUseNum) continue;
         debugInfo.accountsProcessed += 1;
 
-        const rawList = await fetchKftcTransactions(accessToken, fintechUseNum, fromDate, toDate);
+        const rawList = await fetchKftcTransactions(accessToken, fintechUseNum, fromDate, toDate, kftcLogs);
         debugInfo.rawCount += rawList.length;
         if (process.env.NODE_ENV !== 'production') {
           console.log(`[KFTC][transactions] fintech_use_num=${fintechUseNum}, fetched=${rawList.length}`);
@@ -645,7 +677,10 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
       bankNames,
       accounts: accountsInfo,
       transactions: responseTransactions,
-      debug: debugInfo,
+      debug: {
+        ...debugInfo,
+        kftcLogs,
+      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected error';
