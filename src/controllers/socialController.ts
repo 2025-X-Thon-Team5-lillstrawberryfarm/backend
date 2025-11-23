@@ -136,7 +136,7 @@ export async function listFollowers(req: Request, res: Response): Promise<Respon
       FROM follows f
       JOIN users u ON u.id = f.follower_id
       WHERE f.following_id = ?
-      ORDER BY f.id DESC
+      ORDER BY u.id DESC
       `,
       [userId]
     );
