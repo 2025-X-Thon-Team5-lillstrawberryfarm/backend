@@ -132,7 +132,7 @@ export async function listFollowers(req: Request, res: Response): Promise<Respon
   try {
     const [rows] = await pool.query<RowDataPacket[]>(
       `
-      SELECT u.id AS userId, u.nickname AS nick, u.profile_image AS img
+      SELECT u.id AS userId, u.nickname AS nick
       FROM follows f
       JOIN users u ON u.id = f.follower_id
       WHERE f.following_id = ?
