@@ -4,6 +4,7 @@ import authRouter from './auth';
 import usersRouter from './users';
 import transactionsRouter from './transactions';
 import socialRouter from './social';
+import communityRouter from './community';
 
 const mainRouter = Router();
 
@@ -16,5 +17,6 @@ mainRouter.use('/users', usersRouter);
 mainRouter.use('/transactions', transactionsRouter);
 mainRouter.use('/bank', bankRouter);
 mainRouter.use('/social', socialRouter);
+mainRouter.use('/community', communityRouter);
 
 export default mainRouter;

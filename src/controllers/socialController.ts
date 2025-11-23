@@ -157,9 +157,11 @@ export async function getSocialReport(req: Request, res: Response): Promise<Resp
       [targetId]
     );
 
+    const totalSpend = statsRows.reduce((sum, row) => sum + (Number(row.spend) || 0), 0);
     const pattern: Record<string, number> = {};
     for (const row of statsRows) {
-      pattern[row.category] = Number(row.spend) || 0;
+      const spend = Number(row.spend) || 0;
+      pattern[row.category] = totalSpend > 0 ? Math.round((spend / totalSpend) * 100) : 0;
     }
     const fav = statsRows[0]?.category || null;
 
