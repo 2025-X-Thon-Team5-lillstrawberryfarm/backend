@@ -51,3 +51,4 @@ jobs:
             DB_CONNECT_TIMEOUT=${{ secrets.DB_CONNECT_TIMEOUT }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
             KFTC_BANK_TRAN_ID_PREFIX=${{ secrets.KFTC_BANK_TRAN_ID_PREFIX }}
+            KFTC_SCOPE=${{ secrets.KFTC_SCOPE }}

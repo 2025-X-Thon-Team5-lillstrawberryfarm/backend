@@ -210,7 +210,9 @@ async function refreshAccessToken(refreshToken: string, scope: string, userSeqNo
   }
 }
 
-export async function ensureKftcAccessToken(userId: number, requestedScope = 'login transfer'): Promise<string> {
+const DEFAULT_SCOPE = process.env.KFTC_SCOPE || 'login inquiry';
+
+export async function ensureKftcAccessToken(userId: number, requestedScope = DEFAULT_SCOPE): Promise<string> {
   const [rows] = await pool.execute<UserTokenRow[]>(
     `SELECT kftc_access_token, kftc_refresh_token, kftc_user_seq_no, kftc_token_expires_at
      FROM users WHERE id = ? LIMIT 1`,
@@ -426,7 +428,7 @@ bankRouter.get('/auth-url', (_req: Request, res: Response) => {
 
   const state = generateState();
   rememberState(state);
-  const scope = 'login transfer';
+  const scope = DEFAULT_SCOPE;
 
   const url = new URL(`${KFTC_BASE_URL}/oauth/2.0/authorize`);
   url.searchParams.set('response_type', 'code');
@@ -446,7 +448,7 @@ bankRouter.get('/auth-url', (_req: Request, res: Response) => {
 bankRouter.get('/auth/callback', (req: Request, res: Response) => {
   const code = req.query.code as string | undefined;
   const state = req.query.state as string | undefined;
-  const scope = (req.query.scope as string | undefined) || 'login transfer';
+  const scope = (req.query.scope as string | undefined) || DEFAULT_SCOPE;
 
   if (!code) {
     return res.status(400).json({ error: 'code is required' });
@@ -472,7 +474,7 @@ bankRouter.post('/connect', requireAuth, async (req: Request, res: Response) => 
     return res.status(400).json({ error: 'kftcAuthCode is required' });
   }
 
-  const requestedScope = scope || 'login transfer';
+  const requestedScope = scope || DEFAULT_SCOPE;
 
   const userId = req.user?.id;
   if (!userId) {
